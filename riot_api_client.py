@@ -421,7 +421,7 @@ class RiotAPIClient:
 def main():
     """テスト用のメイン関数"""
     # 注意: 実際のAPIキーが必要です
-    api_key = "YOUR_API_KEY_HERE"
+    api_key = "RGAPI-53f6bfcf-8ff5-4d8d-b317-968accba6c75"
     
     if api_key == "YOUR_API_KEY_HERE":
         print("APIキーを設定してください")

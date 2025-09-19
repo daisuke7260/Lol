@@ -575,11 +575,11 @@ def main():
     
     # テスト用の設定
     mysql_config = {
-        'host': 'localhost',
+        'host': '160.251.214.153',
         'port': 3306,
-        'database': 'lol_winrate_db',
-        'user': 'root',
-        'password': '',
+        'database': 'loldb',
+        'user': 'admin',
+        'password': 'RO3f7p6k$!',
         'charset': 'utf8mb4'
     }
     

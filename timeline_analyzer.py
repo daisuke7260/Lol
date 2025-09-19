@@ -51,7 +51,6 @@ class LeagueEntryDTO:
     veteran: bool
     fresh_blood: bool
     inactive: bool
-    # miniSeries: Optional[MiniSeriesDTO] # MiniSeriesDTOは今回は省略
 
 class RiotAPIClient:
     """Riot APIクライアント"""
@@ -66,7 +65,7 @@ class RiotAPIClient:
         url = f"{self.base_url}{endpoint}"
         try:
             response = requests.get(url, headers=self.headers)
-            response.raise_for_status()  # HTTPエラーがあれば例外を発生させる
+            response.raise_for_status()
             return response.json()
         except requests.exceptions.HTTPError as http_err:
             logger.error(f"HTTPエラーが発生しました: {http_err} - レスポンス: {response.text}")
@@ -82,8 +81,6 @@ class RiotAPIClient:
         if data:
             league_entries = []
             for entry in data:
-                # Solo/Duo Queue (RANKED_SOLO_5x5) の情報のみを抽出する例
-                # 必要に応じて他のキュータイプも追加可能
                 if entry.get("queueType") == "RANKED_SOLO_5x5":
                     league_entries.append(LeagueEntryDTO(
                         league_id=entry.get("leagueId", ""),
@@ -114,7 +111,51 @@ class TimelineAnalyzer:
             'UTILITY': {'x_range': (0, 14000), 'y_range': (0, 14000)}
         }
         self.api_client = RiotAPIClient(api_key, region) if api_key else None
+        
+        # アイテム価値マッピング
+        self.item_values = {
+            0: 0,        # 空スロット
+            1001: 300,   # ブーツ
+            1036: 350,   # ロングソード
+            1052: 435,   # アンプトーム
+            1029: 400,   # クロスソード
+            1058: 850,   # ニードレスリーロッド
+            3020: 1100,  # ソーサラーシューズ
+            3006: 1100,  # バーサーカーグリーブ
+            3047: 1100,  # プレートスチールキャップ
+            3111: 1100,  # マーキュリーブーツ
+            3089: 3200,  # ラバドンデスキャップ
+            3135: 2700,  # ヴォイドスタッフ
+            3157: 2600,  # ゾーニャの砂時計
+            3116: 2600,  # ライライクリスタルセプター
+            3165: 2200,  # モレロノミコン
+            3285: 3200,  # ルーデンエコー
+            3031: 3400,  # インフィニティエッジ
+            3094: 2600,  # ラピッドファイアキャノン
+            3085: 2600,  # ランナンズハリケーン
+            3072: 3300,  # ブラッドサースター
+            2003: 50,    # ヘルスポーション
+            2031: 500,   # リフィルポーション
+            3340: 0,     # ステルスワード
+            3364: 0,     # 遠見改良
+        }
+        
         logger.info("タイムライン分析器を初期化しました")
+    
+    def calculate_item_value(self, items: List[int]) -> int:
+        """アイテムの総価値を計算"""
+        if not items:
+            return 0
+        
+        total_value = 0
+        for item_id in items:
+            if item_id in self.item_values:
+                total_value += self.item_values[item_id]
+            else:
+                # 未知のアイテムは平均価値を使用
+                total_value += 1000
+        
+        return total_value
     
     def analyze_timeline(self, timeline_data: Dict, match_data: Dict) -> Dict[str, Any]:
         """
@@ -131,7 +172,7 @@ class TimelineAnalyzer:
             result = {
                 'match_id': match_data.get('metadata', {}).get('matchId'),
                 'game_duration': match_data.get('info', {}).get('gameDuration', 0),
-                'solo_kills': solo_kills,  # SoloKillEventオブジェクトのリストのまま保持
+                'solo_kills': solo_kills,
                 'lane_solo_kills': lane_solo_kills,
                 'statistics': statistics,
                 'participants': participants
@@ -166,15 +207,12 @@ class TimelineAnalyzer:
                 if self.api_client and puuid:
                     league_entries = self.api_client.get_league_entries_by_puuid(puuid)
                     if league_entries:
-                        # ソロ/デュオキューのランク情報を優先して格納
                         solo_duo_rank = next((entry for entry in league_entries if entry.queue_type == "RANKED_SOLO_5x5"), None)
                         if solo_duo_rank:
                             participant_info['rank_tier'] = solo_duo_rank.tier
                             participant_info['rank_rank'] = solo_duo_rank.rank
                             participant_info['rank_lp'] = solo_duo_rank.league_points
                         else:
-                            # 他のキューのランク情報があればそれも考慮する
-                            # 例: フレキシブルキューのランク情報
                             flex_rank = next((entry for entry in league_entries if entry.queue_type == "RANKED_FLEX_SR"), None)
                             if flex_rank:
                                 participant_info['rank_tier'] = flex_rank.tier
@@ -200,7 +238,7 @@ class TimelineAnalyzer:
             return {}
 
     def _extract_solo_kills(self, timeline_data: Dict, participants: Dict) -> List[SoloKillEvent]:
-        """ソロキルイベントを抽出"""
+        """ソロキルイベントを抽出（正確なキル直前レベル取得）"""
         solo_kills = []
         participant_inventories: Dict[int, List[int]] = {p_id: [] for p_id in participants.keys()}
 
@@ -212,9 +250,12 @@ class TimelineAnalyzer:
                 current_participant_frames = self._parse_participant_frames(frame.get('participantFrames', {}))
                 events_in_frame = sorted(frame.get('events', []), key=lambda x: x.get('timestamp', 0))
 
+                # アイテムイベントとキルイベントを分離
                 item_events = [e for e in events_in_frame if e.get('type') in ['ITEM_PURCHASED', 'ITEM_SOLD', 'ITEM_DESTROYED', 'ITEM_UNDO']]
                 kill_events = [e for e in events_in_frame if e.get('type') == 'CHAMPION_KILL']
+                level_up_events = [e for e in events_in_frame if e.get('type') == 'LEVEL_UP']
 
+                # アイテムインベントリを更新
                 for event in item_events:
                     participant_id = event.get('participantId')
                     item_id = event.get('itemId')
@@ -228,20 +269,56 @@ class TimelineAnalyzer:
                         elif event['type'] == 'ITEM_UNDO' and participant_inventories[participant_id] and participant_inventories[participant_id][-1] == item_id:
                             participant_inventories[participant_id].pop()
 
-                for event in kill_events:
-                    killer_id = event.get('killerId')
-                    victim_id = event.get('victimId')
+                # キルイベントを処理
+                for kill_event in kill_events:
+                    killer_id = kill_event.get('killerId')
+                    victim_id = kill_event.get('victimId')
+                    kill_timestamp = kill_event.get('timestamp', timestamp)
+                    
+                    # キル時点でのアイテムを取得
                     killer_items_at_kill = participant_inventories.get(killer_id, [])[:]
                     victim_items_at_kill = participant_inventories.get(victim_id, [])[:]
+                    
+                    # アイテムリストを7個に調整
+                    killer_items_padded = (killer_items_at_kill + [0] * 7)[:7]
+                    victim_items_padded = (victim_items_at_kill + [0] * 7)[:7]
+
+                    # キル直前のレベルを正確に取得
+                    killer_level_before_kill = current_participant_frames.get(killer_id, ParticipantFrame(killer_id, 1, 0, 0, 0, 0, 0, (0, 0))).level
+                    victim_level_before_kill = current_participant_frames.get(victim_id, ParticipantFrame(victim_id, 1, 0, 0, 0, 0, 0, (0, 0))).level
+
+                    # キル後のレベルアップイベントをチェック
+                    for level_up_event in level_up_events:
+                        level_up_timestamp = level_up_event.get('timestamp', 0)
+                        level_up_participant = level_up_event.get('participantId')
+                        
+                        # キル後にレベルアップした場合、キル前のレベルを調整
+                        if level_up_timestamp > kill_timestamp:
+                            if level_up_participant == killer_id:
+                                # キラーがキル後にレベルアップした場合
+                                new_level = level_up_event.get('level', killer_level_before_kill)
+                                killer_level_before_kill = max(1, new_level - 1)
+                                logger.debug(f"キラー{killer_id}のキル後レベルアップを検出: {new_level} -> キル前レベル: {killer_level_before_kill}")
+                            elif level_up_participant == victim_id:
+                                # 被害者がキル後にレベルアップした場合（稀だが可能性あり）
+                                new_level = level_up_event.get('level', victim_level_before_kill)
+                                victim_level_before_kill = max(1, new_level - 1)
+                                logger.debug(f"被害者{victim_id}のキル後レベルアップを検出: {new_level} -> キル前レベル: {victim_level_before_kill}")
 
                     solo_kill = self._process_kill_event(
-                        event, timestamp, game_time_seconds, 
+                        kill_event, kill_timestamp, game_time_seconds, 
                         current_participant_frames, participants,
-                        killer_items=killer_items_at_kill,
-                        victim_items=victim_items_at_kill
+                        killer_items=killer_items_padded,
+                        victim_items=victim_items_padded,
+                        killer_level_before_kill=killer_level_before_kill,
+                        victim_level_before_kill=victim_level_before_kill
                     )
                     if solo_kill:
+                        logger.debug(f"ソロキル検出: キラー{killer_id}(Lv{killer_level_before_kill}) vs 被害者{victim_id}(Lv{victim_level_before_kill})")
+                        logger.debug(f"  キラーアイテム: {killer_items_padded}")
+                        logger.debug(f"  被害者アイテム: {victim_items_padded}")
                         solo_kills.append(solo_kill)
+                        
             return solo_kills
         except Exception as e:
             logger.error(f"ソロキルイベント抽出エラー: {e}")
@@ -272,19 +349,22 @@ class TimelineAnalyzer:
     def _process_kill_event(self, event: Dict, timestamp: int, game_time_seconds: int,
                            participant_frames: Dict[int, ParticipantFrame],
                            participants: Dict,
-                           killer_items: List[int], victim_items: List[int]) -> Optional[SoloKillEvent]:
-        """キルイベントを処理してソロキルかどうか判定"""
+                           killer_items: List[int], victim_items: List[int],
+                           killer_level_before_kill: int, victim_level_before_kill: int) -> Optional[SoloKillEvent]:
+        """キルイベントを処理してソロキルかどうか判定（正確なキル直前レベル対応）"""
         try:
             killer_id = event.get('killerId')
             victim_id = event.get('victimId')
             assisting_ids = event.get('assistingParticipantIds', [])
             
+            # ソロキルの条件：アシストがない
             if not assisting_ids and killer_id and victim_id:
                 killer_frame = participant_frames.get(killer_id)
                 victim_frame = participant_frames.get(victim_id)
                 if not killer_frame or not victim_frame:
                     return None
                 
+                # 同じチームのキルは除外
                 killer_team = participants.get(killer_id, {}).get('team_id')
                 victim_team = participants.get(victim_id, {}).get('team_id')
                 if killer_team == victim_team:
@@ -295,8 +375,8 @@ class TimelineAnalyzer:
                     game_time_seconds=game_time_seconds,
                     killer_participant_id=killer_id,
                     victim_participant_id=victim_id,
-                    killer_level=killer_frame.level,
-                    victim_level=victim_frame.level,
+                    killer_level=killer_level_before_kill,  # 正確なキル直前レベル
+                    victim_level=victim_level_before_kill,  # 正確なキル直前レベル
                     killer_gold=killer_frame.total_gold,
                     victim_gold=victim_frame.total_gold,
                     killer_position=killer_frame.position,
@@ -334,7 +414,15 @@ class TimelineAnalyzer:
         """ソロキル統計を計算"""
         try:
             if not solo_kills:
-                return {'total_solo_kills': 0, 'first_blood_time': 0, 'average_level_diff': 0.0, 'average_gold_diff': 0.0, 'early_game_kills': 0, 'mid_game_kills': 0, 'late_game_kills': 0}
+                return {
+                    'total_solo_kills': 0, 
+                    'first_blood_time': 0, 
+                    'average_level_diff': 0.0, 
+                    'average_gold_diff': 0.0, 
+                    'early_game_kills': 0, 
+                    'mid_game_kills': 0, 
+                    'late_game_kills': 0
+                }
             
             total_kills = len(solo_kills)
             first_blood_time = min(kill.timestamp_ms for kill in solo_kills)
@@ -349,109 +437,39 @@ class TimelineAnalyzer:
             return {
                 'total_solo_kills': total_kills,
                 'first_blood_time': first_blood_time,
-                'average_level_diff': round(avg_level_diff, 2),
-                'average_gold_diff': round(avg_gold_diff, 2),
+                'average_level_diff': avg_level_diff,
+                'average_gold_diff': avg_gold_diff,
                 'early_game_kills': early_game_kills,
                 'mid_game_kills': mid_game_kills,
-                'late_game_kills': late_game_kills,
-                'level_diff_distribution': {'min': min(level_diffs) if level_diffs else 0, 'max': max(level_diffs) if level_diffs else 0, 'avg': avg_level_diff},
-                'gold_diff_distribution': {'min': min(gold_diffs) if gold_diffs else 0, 'max': max(gold_diffs) if gold_diffs else 0, 'avg': avg_gold_diff}
+                'late_game_kills': late_game_kills
             }
         except Exception as e:
             logger.error(f"統計計算エラー: {e}")
-            return {}
+            return {
+                'total_solo_kills': 0, 
+                'first_blood_time': 0, 
+                'average_level_diff': 0.0, 
+                'average_gold_diff': 0.0, 
+                'early_game_kills': 0, 
+                'mid_game_kills': 0, 
+                'late_game_kills': 0
+            }
 
-    def get_matchup_solo_kills(self, lane_solo_kills: Dict[str, List[SoloKillEvent]], 
+    def get_matchup_solo_kills(self, solo_kills: List[SoloKillEvent], 
                               participants: Dict) -> List[SoloKillEvent]:
-        """指定レーンの対面ソロキルを取得"""
+        """対面チャンピオン間のソロキルのみを抽出"""
+        matchup_kills = []
         try:
-            if lane not in lane_solo_kills:
-                return []
-            
-            lane_kills = lane_solo_kills[lane]
-            matchup_kills = []
-            lane_participants = [p_id for p_id, p_info in participants.items() if p_info.get('team_position') == lane]
-            
-            for kill in lane_kills:
-                if (kill.killer_participant_id in lane_participants and kill.victim_participant_id in lane_participants):
-                    matchup_kills.append(kill)
+            for solo_kill in solo_kills:
+                killer_lane = participants.get(solo_kill.killer_participant_id, {}).get('team_position', 'UNKNOWN')
+                victim_lane = participants.get(solo_kill.victim_participant_id, {}).get('team_position', 'UNKNOWN')
+                
+                # 同じレーンの対面チャンピオン間のキルのみを抽出
+                if killer_lane == victim_lane and killer_lane != 'UNKNOWN':
+                    matchup_kills.append(solo_kill)
+                    
+            logger.info(f"対面ソロキル抽出: {len(matchup_kills)}個")
             return matchup_kills
         except Exception as e:
-            logger.error(f"対面ソロキル取得エラー: {e}")
+            logger.error(f"対面ソロキル抽出エラー: {e}")
             return []
-
-    def calculate_item_value(self, items: List[int], item_data: Dict = None) -> int:
-        """アイテムの総価値を計算"""
-        try:
-            if not item_data:
-                return sum(item_id * 100 for item_id in items if item_id > 0)
-            
-            total_value = 0
-            for item_id in items:
-                if item_id > 0 and str(item_id) in item_data.get('data', {}):
-                    item_info = item_data['data'][str(item_id)]
-                    gold_info = item_info.get('gold', {})
-                    total_value += gold_info.get('total', 0)
-            return total_value
-        except Exception as e:
-            logger.error(f"アイテム価値計算エラー: {e}")
-            return 0
-
-def main():
-    """テスト用のメイン関数"""
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    
-    # ここにRiot APIキーを設定してください
-    RIOT_API_KEY = "RGAPI-2651c9a7-74fe-4ff0-8178-656289113687" # ユーザーから提供されたAPIキー
-    analyzer = TimelineAnalyzer(api_key=RIOT_API_KEY)
-    
-    test_timeline = {'info': {'frames': [{'timestamp': 0, 'participantFrames': {'1': {'level': 1, 'currentGold': 500, 'totalGold': 500, 'xp': 0, 'minionsKilled': 0, 'jungleMinionsKilled': 0, 'position': {'x': 500, 'y': 500}}, '6': {'level': 1, 'currentGold': 500, 'totalGold': 500, 'xp': 0, 'minionsKilled': 0, 'jungleMinionsKilled': 0, 'position': {'x': 14000, 'y': 14000}}}, 'events': [{'type': 'ITEM_PURCHASED', 'timestamp': 0, 'participantId': 1, 'itemId': 1055}, {'type': 'ITEM_PURCHASED', 'timestamp': 0, 'participantId': 1, 'itemId': 2003}, {'type': 'ITEM_PURCHASED', 'timestamp': 0, 'participantId': 6, 'itemId': 1055}, {'type': 'ITEM_PURCHASED', 'timestamp': 0, 'participantId': 6, 'itemId': 2003}]}, {'timestamp': 300000, 'participantFrames': {'1': {'level': 6, 'currentGold': 1500, 'totalGold': 2000, 'xp': 5000, 'minionsKilled': 30, 'jungleMinionsKilled': 0, 'position': {'x': 7000, 'y': 7000}}, '6': {'level': 5, 'currentGold': 1200, 'totalGold': 1800, 'xp': 4000, 'minionsKilled': 25, 'jungleMinionsKilled': 0, 'position': {'x': 7100, 'y': 7100}}}, 'events': [{'type': 'ITEM_PURCHASED', 'timestamp': 300000, 'participantId': 1, 'itemId': 1001}, {'type': 'ITEM_PURCHASED', 'timestamp': 300000, 'participantId': 1, 'itemId': 1036}, {'type': 'ITEM_PURCHASED', 'timestamp': 300000, 'participantId': 6, 'itemId': 1001}, {'type': 'ITEM_PURCHASED', 'timestamp': 300000, 'participantId': 6, 'itemId': 1029}, {'type': 'CHAMPION_KILL', 'timestamp': 300000, 'killerId': 1, 'victimId': 6, 'assistingParticipantIds': [], 'bounty': 300, 'killType': 'KILL_NORMAL'}]}, {'timestamp': 600000, 'participantFrames': {'1': {'level': 9, 'currentGold': 2500, 'totalGold': 4000, 'xp': 9000, 'minionsKilled': 60, 'jungleMinionsKilled': 0, 'position': {'x': 8000, 'y': 8000}}, '6': {'level': 8, 'currentGold': 2000, 'totalGold': 3500, 'xp': 7500, 'minionsKilled': 50, 'jungleMinionsKilled': 0, 'position': {'x': 8100, 'y': 8100}}}, 'events': [{'type': 'ITEM_PURCHASED', 'timestamp': 600000, 'participantId': 1, 'itemId': 3006}, {'type': 'ITEM_PURCHASED', 'timestamp': 600000, 'participantId': 1, 'itemId': 1058}, {'type': 'ITEM_PURCHASED', 'timestamp': 600000, 'participantId': 6, 'itemId': 3006}, {'type': 'ITEM_PURCHASED', 'timestamp': 600000, 'participantId': 6, 'itemId': 1058}]}]}}
-    test_match_data = {
-        'metadata': {'matchId': 'test_match_123'},
-        'info': {
-            'gameDuration': 1800,
-            'participants': [
-                {'participantId': 1, 'puuid': '0vrRAD971pk3lXj5cLNCRqFYWoGn6Gxzaa57aB8I8mcJzNgHunoDs0yp8L9Yx36NQ2wUW6fQSd2Kpg', 'championId': 1, 'championName': 'Annie', 'teamId': 100, 'lane': 'MIDDLE', 'teamPosition': 'MIDDLE', 'win': True},
-                {'participantId': 6, 'puuid': '0vrRAD971pk3lXj5cLNCRqFYWoGn6Gxzaa57aB8I8mcJzNgHunoDs0yp8L9Yx36NQ2wUW6fQSd2Kpg', 'championId': 2, 'championName': 'Olaf', 'teamId': 200, 'lane': 'MIDDLE', 'teamPosition': 'MIDDLE', 'win': False}
-            ]
-        }
-    }
-    
-    analysis_result = analyzer.analyze_timeline(test_timeline, test_match_data)
-    
-    class SoloKillEventEncoder(json.JSONEncoder):
-        def default(self, obj):
-            if isinstance(obj, SoloKillEvent):
-                return asdict(obj)
-            if isinstance(obj, LeagueEntryDTO):
-                return asdict(obj)
-            return super().default(obj)
-
-    print("\n--- Analysis Result ---")
-    print(json.dumps(analysis_result, indent=2, ensure_ascii=False, cls=SoloKillEventEncoder))
-    
-    if analysis_result and analysis_result['solo_kills']:
-        first_solo_kill = analysis_result['solo_kills'][0]
-        print("\n--- First Solo Kill Items ---")
-        print(f"Killer Items: {first_solo_kill.killer_items}")
-        print(f"Victim Items: {first_solo_kill.victim_items}")
-        
-        expected_killer_items = [1055, 2003, 1001, 1036]
-        expected_victim_items = [1055, 2003, 1001, 1029]
-        
-        if sorted(first_solo_kill.killer_items) == sorted(expected_killer_items) and sorted(first_solo_kill.victim_items) == sorted(expected_victim_items):
-            print("アイテム取得が正確です！")
-        else:
-            print("アイテム取得に問題があります。")
-            print(f"Expected Killer Items: {expected_killer_items}")
-            print(f"Expected Victim Items: {expected_victim_items}")
-
-    # ランク情報の確認
-    print("\n--- Participant Ranks ---")
-    for p_id, p_info in analysis_result['participants'].items():
-        print(f"Participant {p_id} (PUUID: {p_info['puuid']}): Rank: {p_info.get('rank_tier', 'N/A')} {p_info.get('rank_rank', 'N/A')} ({p_info.get('rank_lp', 'N/A')} LP)")
-
-if __name__ == "__main__":
-    main()
-
-

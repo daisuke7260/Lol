@@ -7,16 +7,16 @@ import os
 from typing import Dict
 
 # Riot Games API設定
-RIOT_API_KEY = os.getenv('RIOT_API_KEY', 'RGAPI-your-api-key-here')
+RIOT_API_KEY = os.getenv('RIOT_API_KEY', 'RGAPI-53f6bfcf-8ff5-4d8d-b317-968accba6c75')
 RIOT_REGION = os.getenv('RIOT_REGION', 'jp1')
 
 # MySQL データベース設定
 MYSQL_CONFIG = {
-    'host': os.getenv('MYSQL_HOST', 'localhost'),
+    'host': os.getenv('MYSQL_HOST', '160.251.214.153'),
     'port': int(os.getenv('MYSQL_PORT', 3306)),
-    'database': os.getenv('MYSQL_DATABASE', 'lol_winrate_db'),
-    'user': os.getenv('MYSQL_USER', 'root'),
-    'password': os.getenv('MYSQL_PASSWORD', ''),
+    'database': os.getenv('MYSQL_DATABASE', 'loldb'),
+    'user': os.getenv('MYSQL_USER', 'admin'),
+    'password': os.getenv('MYSQL_PASSWORD', 'RO3f7p6k$!'),
     'charset': 'utf8mb4',
     'autocommit': True,
     'use_unicode': True

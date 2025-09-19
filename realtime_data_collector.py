@@ -204,7 +204,7 @@ class RealtimeDataCollector:
                 else:
                     matchup_dict = matchup
                 
-                lane = matchup_dict.get('lane')
+                lane = matchup_dict['lane'] if isinstance(matchup_dict, dict) else getattr(matchup_dict, 'lane', None)
                 
                 # 対面データを挿入
                 matchup_id = self.db_manager.insert_matchup(matchup_dict)
@@ -215,7 +215,7 @@ class RealtimeDataCollector:
                 
                 # このレーンのソロキルを取得
                 lane_kills = self.timeline_analyzer.get_matchup_solo_kills(
-                    lane_solo_kills, participants, lane
+                    lane_solo_kills.get(lane, []), participants
                 )
                 
                 # ソロキルデータを挿入
@@ -478,29 +478,30 @@ class RealtimeDataCollector:
             processed_players = 0
             
             for i, player in enumerate(players):
-                summoner_id = player.get('summonerId')
+                # summoner_id = player.get('summonerId')
+                summoner_puuid = player.get('puuid')
                 summoner_name = player.get('summonerName', f'Player_{i+1}')
                 
-                if not summoner_id:
-                    continue
+                # if not summoner_id:
+                #     continue
                 
                 logger.info(f"プレイヤー処理中: {i+1}/{len(players)} - {summoner_name}")
                 
                 try:
                     # サモナー情報を取得してPUUIDを取得
-                    summoner_data = self.api_client.get_summoner_by_id(summoner_id)
-                    if not summoner_data:
-                        logger.warning(f"サモナー情報の取得に失敗: {summoner_name}")
-                        continue
+                    # summoner_data = self.api_client.get_summoner_by_id(summoner_id)
+                    # if not summoner_data:
+                    #     logger.warning(f"サモナー情報の取得に失敗: {summoner_name}")
+                    #     continue
                     
-                    puuid = summoner_data.get('puuid')
-                    if not puuid:
-                        logger.warning(f"PUUIDが見つかりません: {summoner_name}")
-                        continue
+                    # puuid = summoner_data.get('puuid')
+                    # if not puuid:
+                    #     logger.warning(f"PUUIDが見つかりません: {summoner_name}")
+                    #     continue
                     
                     # 試合データを収集
                     collected = self.collect_player_matches_with_timeline(
-                        puuid, summoner_name, matches_per_player
+                        summoner_puuid, summoner_name, matches_per_player
                     )
                     
                     total_collected += collected
@@ -555,17 +556,17 @@ def main():
         # データ収集システムを初期化
         collector = RealtimeDataCollector(RIOT_API_KEY, MYSQL_CONFIG, RIOT_REGION)
         
-        # 静的データをセットアップ
-        if not collector.setup_static_data():
-            logger.error("静的データのセットアップに失敗")
-            return
+        # # 静的データをセットアップ
+        # if not collector.setup_static_data():
+        #     logger.error("静的データのセットアップに失敗")
+        #     return
         
         # 小規模テスト
         logger.info("小規模テストを開始...")
         results = collector.collect_from_high_rank_players(
-            tier='GRANDMASTER',
-            player_count=3,
-            matches_per_player=5
+            tier='MASTER',
+            player_count=100,
+            matches_per_player=10
         )
         
         # 結果を表示
