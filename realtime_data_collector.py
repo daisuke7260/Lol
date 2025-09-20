@@ -445,6 +445,27 @@ class RealtimeDataCollector:
                 league_data = self.api_client.get_grandmaster_league()
             elif tier == 'MASTER':
                 league_data = self.api_client.get_master_league()
+            elif tier in ['DIAMOND', 'PLATINUM', 'GOLD', 'SILVER', 'BRONZE', 'IRON']:
+                # divisionはI, II, III, IVでページ分割されている
+                entries = []
+                divisions = ['I', 'II', 'III', 'IV']
+                for division in divisions:
+                    page = 1
+                    while True:
+                        league_page = self.api_client.get_league_entries_by_tier_division(
+                            tier=tier, division=division, queue='RANKED_SOLO_5x5', page=page
+                        )
+                        if not league_page:
+                            break
+                        entries.extend(league_page)
+                        if len(league_page) < 200:
+                            break
+                        page += 1
+                        if len(entries) >= count:
+                            break
+                    if len(entries) >= count:
+                        break
+                league_data = {'entries': entries[:count]}
             else:
                 logger.error(f"無効なティア: {tier}")
                 return []
@@ -561,18 +582,18 @@ def main():
         #     logger.error("静的データのセットアップに失敗")
         #     return
         
-        # 小規模テスト
-        logger.info("小規模テストを開始...")
-        results = collector.collect_from_high_rank_players(
-            tier='MASTER',
-            player_count=100,
-            matches_per_player=10
-        )
-        
-        # 結果を表示
-        print("\n=== 収集結果 ===")
-        for key, value in results.items():
-            print(f"{key}: {value}")
+        # 各ランクごとにデータ収集
+        tiers = ['CHALLENGER', 'GRANDMASTER', 'MASTER', 'DIAMOND', 'PLATINUM', 'GOLD', 'SILVER', 'BRONZE', 'IRON']
+        for tier in tiers:
+            logger.info(f"{tier}ランクのデータ収集を開始...")
+            results = collector.collect_from_high_rank_players(
+                tier=tier,
+                player_count=100,  # 必要に応じて調整
+                matches_per_player=10  # 必要に応じて調整
+            )
+            print(f"\n=== {tier} 収集結果 ===")
+            for key, value in results.items():
+                print(f"{key}: {value}")
         
     except Exception as e:
         logger.error(f"メイン実行エラー: {e}")

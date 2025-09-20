@@ -7,7 +7,7 @@ import os
 from typing import Dict
 
 # Riot Games API設定
-RIOT_API_KEY = os.getenv('RIOT_API_KEY', 'RGAPI-53f6bfcf-8ff5-4d8d-b317-968accba6c75')
+RIOT_API_KEY = os.getenv('RIOT_API_KEY', 'RGAPI-a0b1650e-5f4a-4175-990c-c48095fbca3f')
 RIOT_REGION = os.getenv('RIOT_REGION', 'jp1')
 
 # MySQL データベース設定

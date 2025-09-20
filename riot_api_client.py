@@ -30,6 +30,21 @@ class RateLimitInfo:
             self.request_times_2m = []
 
 class RiotAPIClient:
+    def get_league_entries_by_tier_division(self, tier: str, division: str, queue: str = 'RANKED_SOLO_5x5', page: int = 1) -> Optional[List[Dict]]:
+        """
+        指定したtier/divisionのリーグエントリー一覧を取得
+        Args:
+            tier: ティア（例: 'GOLD', 'SILVER', 'BRONZE', ...）
+            division: ディビジョン（'I', 'II', 'III', 'IV'）
+            queue: キューの種類（デフォルト: RANKED_SOLO_5x5）
+            page: ページ番号（デフォルト: 1）
+        Returns:
+            プレイヤー情報リスト
+        """
+        base_url = self.REGIONAL_ENDPOINTS[self.region]
+        url = f"{base_url}/lol/league/v4/entries/{queue}/{tier}/{division}"
+        params = {'page': page}
+        return self._make_request(url, params)
     """Riot Games API クライアント"""
     
     # 地域別エンドポイント
@@ -421,7 +436,7 @@ class RiotAPIClient:
 def main():
     """テスト用のメイン関数"""
     # 注意: 実際のAPIキーが必要です
-    api_key = "RGAPI-53f6bfcf-8ff5-4d8d-b317-968accba6c75"
+    api_key = "RGAPI-a0b1650e-5f4a-4175-990c-c48095fbca3f"
     
     if api_key == "YOUR_API_KEY_HERE":
         print("APIキーを設定してください")

@@ -66,7 +66,7 @@ class RealtimeDatabaseManager:
                 cursor = conn.cursor()
                 
                 query = """
-                INSERT INTO game_versions (version, release_date, is_active)
+                INSERT IGNORE INTO game_versions (version, release_date, is_active)
                 VALUES (%s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                 release_date = VALUES(release_date),
@@ -149,6 +149,9 @@ class RealtimeDatabaseManager:
             return False
     
     def insert_match(self, match_data: Dict) -> bool:
+        game_version = match_data.get('info', {}).get('gameVersion')
+        self.insert_game_version(game_version)
+
         """試合情報を挿入"""
         try:
             with self.get_connection() as conn:
@@ -575,11 +578,11 @@ def main():
     
     # テスト用の設定
     mysql_config = {
-        'host': '160.251.214.153',
+        'host': 'localhost',
         'port': 3306,
-        'database': 'loldb',
-        'user': 'admin',
-        'password': 'RO3f7p6k$!',
+        'database': 'lol_winrate_db',
+        'user': 'root',
+        'password': '',
         'charset': 'utf8mb4'
     }
     
@@ -599,4 +602,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
