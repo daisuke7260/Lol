@@ -112,7 +112,7 @@ class RealtimeDataCollector:
         """試合データとタイムラインを収集・分析"""
         try:
             logger.info(f"試合データ収集開始: {match_id}")
-            
+
             # 試合データを取得
             match_data = self.api_client.get_match_data(match_id)
             if not match_data:
@@ -128,6 +128,7 @@ class RealtimeDataCollector:
                 return self._process_match_without_timeline(match_data)
             
             # 試合データを挿入
+            avg_tier = self.api_client.get_match_average_tier_by_match_id(match_data)
             if not self.db_manager.insert_match(match_data):
                 logger.error(f"試合データの挿入に失敗: {match_id}")
                 return False
@@ -396,7 +397,6 @@ class RealtimeDataCollector:
             match_ids = self.api_client.get_match_history(
                 puuid, count=match_count, queue=420  # ランクソロ
             )
-            
             if not match_ids:
                 logger.warning(f"試合履歴の取得に失敗: {summoner_name}")
                 return 0
@@ -588,8 +588,8 @@ def main():
             logger.info(f"{tier}ランクのデータ収集を開始...")
             results = collector.collect_from_high_rank_players(
                 tier=tier,
-                player_count=100,  # 必要に応じて調整
-                matches_per_player=10  # 必要に応じて調整
+                player_count=1000,  # 必要に応じて調整
+                matches_per_player=50  # 必要に応じて調整
             )
             print(f"\n=== {tier} 収集結果 ===")
             for key, value in results.items():

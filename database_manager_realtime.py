@@ -14,6 +14,49 @@ from contextlib import contextmanager
 logger = logging.getLogger(__name__)
 
 class RealtimeDatabaseManager:
+    def get_1v1_matchup_features(self, limit: int = 10000) -> List[Dict]:
+        """
+        1vs1対面勝率予測用の特徴量データを取得
+        - 自分と対面のアイテム（item0～item6）
+        - レベル（player1_level, player2_level）
+        - アイテムゴールド総量（item_gold1, item_gold2）
+        Args:
+            limit: 取得件数上限
+        Returns:
+            特徴量データのリスト（辞書）
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor(dictionary=True)
+                query = f'''
+                SELECT
+                    m.id AS matchup_id,
+                    m.player1_champion_id,
+                    m.player2_champion_id,
+                    m.player1_level,
+                    m.player2_level,
+                    m.player1_champion_name,
+                    m.player2_champion_name,
+                    m.lane,
+                    m.game_version,
+                    p1.item0 AS p1_item0, p1.item1 AS p1_item1, p1.item2 AS p1_item2, p1.item3 AS p1_item3, p1.item4 AS p1_item4, p1.item5 AS p1_item5, p1.item6 AS p1_item6,
+                    p2.item0 AS p2_item0, p2.item1 AS p2_item1, p2.item2 AS p2_item2, p2.item3 AS p2_item3, p2.item4 AS p2_item4, p2.item5 AS p2_item5, p2.item6 AS p2_item6,
+                    p1.champion_level AS p1_level,
+                    p2.champion_level AS p2_level,
+                    p1.gold_earned AS p1_gold_earned,
+                    p2.gold_earned AS p2_gold_earned
+                FROM matchups m
+                JOIN participants p1 ON m.match_id = p1.match_id AND m.player1_participant_id = p1.participant_id
+                JOIN participants p2 ON m.match_id = p2.match_id AND m.player2_participant_id = p2.participant_id
+                LIMIT %s
+                '''
+                cursor.execute(query, (limit,))
+                results = cursor.fetchall()
+                logger.info(f"1v1特徴量データ取得: {len(results)}件")
+                return results
+        except Exception as e:
+            logger.error(f"1v1特徴量データ取得エラー: {e}")
+            return []
     """リアルタイム勝率予測用データベース管理クラス"""
     
     def __init__(self, **mysql_config):
@@ -151,7 +194,6 @@ class RealtimeDatabaseManager:
     def insert_match(self, match_data: Dict) -> bool:
         game_version = match_data.get('info', {}).get('gameVersion')
         self.insert_game_version(game_version)
-
         """試合情報を挿入"""
         try:
             with self.get_connection() as conn:
@@ -568,6 +610,365 @@ class RealtimeDatabaseManager:
             logger.error(f"データベース統計取得エラー: {e}")
             return {}
 
+    def select_training_data(self, limit: int = 1, mychampion: int = None, enemyChampion: int = None, debug: bool = False) -> list:
+
+        """学習用データを取得する。
+
+        Args:
+            limit: 取得上限
+
+        Returns:
+            list[dict]: 結果の行のリスト。空の場合は空リストを返します。
+        """
+        try:
+            with self.get_connection() as conn:
+                # 辞書形式で結果を受け取る
+                cursor = conn.cursor(dictionary=True)
+                query = """
+                SELECT
+                    P1_solo_kills                       AS P1_solo_kills           ,
+                    P1_match_id                         AS P1_match_id             ,
+                    P1_killer_champion_id               AS P1_killer_champion_id   ,
+                    P1_killer_champion_name             AS P1_killer_champion_name ,
+                    COALESCE(P1_ITEM0.gold_total, 0) +
+                    COALESCE(P1_ITEM1.gold_total, 0) +
+                    COALESCE(P1_ITEM2.gold_total, 0) +
+                    COALESCE(P1_ITEM3.gold_total, 0) +
+                    COALESCE(P1_ITEM4.gold_total, 0) +
+                    COALESCE(P1_ITEM5.gold_total, 0) +
+                    COALESCE(P1_ITEM6.gold_total, 0)    AS P1_total_gold_value     ,
+                    P2_victim_champion_id               AS P2_victim_champion_id   ,
+                    P2_victim_champion_name             AS P2_victim_champion_name ,
+                    COALESCE(P2_ITEM0.gold_total, 0) +
+                    COALESCE(P2_ITEM1.gold_total, 0) +
+                    COALESCE(P2_ITEM2.gold_total, 0) +
+                    COALESCE(P2_ITEM3.gold_total, 0) +
+                    COALESCE(P2_ITEM4.gold_total, 0) +
+                    COALESCE(P2_ITEM5.gold_total, 0) +
+                    COALESCE(P2_ITEM6.gold_total, 0)    AS P2_total_gold_value     ,
+                    CASE P1_participant_type
+                        WHEN 'killer' THEN
+                            'P1'
+                        ELSE
+                            'P2'
+                    END                                 AS Win_Judgment            ,
+                    P1_killer_level                     AS P1_killer_level         ,
+                    P1_item0                            AS P1_item0                ,
+                    P1_ITEM0.name                       AS P1_ITEM0_name           ,
+                    P1_item1                            AS P1_item1                ,
+                    P1_ITEM1.name                       AS P1_ITEM1_name           ,
+                    P1_item2                            AS P1_item2                ,
+                    P1_ITEM2.name                       AS P1_ITEM2_name           ,
+                    P1_item3                            AS P1_item3                ,
+                    P1_ITEM3.name                       AS P1_ITEM3_name           ,
+                    P1_item4                            AS P1_item4                ,
+                    P1_ITEM4.name                       AS P1_ITEM4_name           ,
+                    P1_item5                            AS P1_item5                ,
+                    P1_ITEM5.name                       AS P1_ITEM5_name           ,
+                    P1_item6                            AS P1_item6                ,
+                    P1_ITEM6.name                       AS P1_ITEM6_name           ,
+                    P2_killer_level                     AS P2_killer_level         ,
+                    P2_item0                            AS P2_item0                ,
+                    P2_ITEM0.name                       AS P2_ITEM0_name           ,
+                    P2_item1                            AS P2_item1                ,
+                    P2_ITEM1.name                       AS P2_ITEM1_name           ,
+                    P2_item2                            AS P2_item2                ,
+                    P2_ITEM2.name                       AS P2_ITEM2_name           ,
+                    P2_item3                            AS P2_item3                ,
+                    P2_ITEM3.name                       AS P2_ITEM3_name           ,
+                    P2_item4                            AS P2_item4                ,
+                    P2_ITEM4.name                       AS P2_ITEM4_name           ,
+                    P2_item5                            AS P2_item5                ,
+                    P2_ITEM5.name                       AS P2_ITEM5_name           ,
+                    P2_item6                            AS P2_item6                ,
+                    P2_ITEM6.name                       AS P2_ITEM6_name           ,
+                    matches.game_version                AS matches_game_version
+                FROM(
+                (
+                SELECT *
+                FROM (
+                    SELECT
+                    ki.id                     AS P1_id                     ,
+                    ki.solo_kill_id           AS P1_solo_kill_id           ,
+                    ki.participant_id         AS P1_participant_id         ,
+                    ki.participant_type       AS P1_participant_type       ,
+                    ki.ITEM0                  AS P1_item0                  ,
+                    ki.ITEM1                  AS P1_item1                  ,
+                    ki.ITEM2                  AS P1_item2                  ,
+                    ki.ITEM3                  AS P1_item3                  ,
+                    ki.ITEM4                  AS P1_item4                  ,
+                    ki.ITEM5                  AS P1_item5                  ,
+                    ki.ITEM6                  AS P1_item6                  ,
+                    ki.total_item_value       AS P1_total_item_value       ,
+                    ki.created_at             AS P1_kill_created_at        ,
+                    sk.id                     AS P1_solo_kills             ,
+                    sk.match_id               AS P1_match_id               ,
+                    sk.matchup_id             AS P1_matchup_id             ,
+                    sk.timestamp_ms           AS P1_timestamp_ms           ,
+                    sk.game_time_seconds      AS P1_game_time_seconds      ,
+                    sk.killer_participant_id  AS P1_killer_participant_id  ,
+                    sk.killer_champion_id     AS P1_killer_champion_id     ,
+                    sk.killer_champion_name   AS P1_killer_champion_name   ,
+                    sk.killer_level           AS P1_killer_level           ,
+                    sk.killer_gold            AS P1_killer_gold            ,
+                    sk.killer_position_x      AS P1_killer_position_x      ,
+                    sk.killer_position_y      AS P1_killer_position_y      ,
+                    sk.victim_participant_id  AS P1_victim_participant_id  ,
+                    sk.victim_champion_id     AS P1_victim_champion_id     ,
+                    sk.victim_champion_name   AS P1_victim_champion_name   ,
+                    sk.victim_level           AS P1_victim_level           ,
+                    sk.victim_gold            AS P1_victim_gold            ,
+                    sk.victim_position_x      AS P1_victim_position_x      ,
+                    sk.victim_position_y      AS P1_victim_position_y      ,
+                    sk.level_diff             AS P1_level_diff             ,
+                    sk.gold_diff              AS P1_gold_diff              ,
+                    sk.is_first_blood         AS P1_is_first_blood         ,
+                    sk.is_shutdown            AS P1_is_shutdown            ,
+                    sk.bounty_gold            AS P1_bounty_gold            ,
+                    sk.created_at             AS P1_solo_created_at        
+                    FROM solo_kills AS sk
+                    INNER JOIN kill_items AS ki ON ki.solo_kill_id = sk.id
+                    WHERE sk.killer_champion_id < sk.victim_champion_id
+                      AND ki.id = (
+                          SELECT MIN(id)
+                          FROM kill_items
+                          WHERE solo_kill_id = ki.solo_kill_id
+                      )
+                ) AS P1
+                INNER JOIN (
+                    SELECT
+                    ki.id                     AS P2_id                     ,
+                    ki.solo_kill_id           AS P2_solo_kill_id           ,
+                    ki.participant_id         AS P2_participant_id         ,
+                    ki.participant_type       AS P2_participant_type       ,
+                    ki.ITEM0                  AS P2_item0                  ,
+                    ki.ITEM1                  AS P2_item1                  ,
+                    ki.ITEM2                  AS P2_item2                  ,
+                    ki.ITEM3                  AS P2_item3                  ,
+                    ki.ITEM4                  AS P2_item4                  ,
+                    ki.ITEM5                  AS P2_item5                  ,
+                    ki.ITEM6                  AS P2_item6                  ,
+                    ki.total_item_value       AS P2_total_item_value       ,
+                    ki.created_at             AS P2_kill_created_at        ,
+                    sk.id                     AS P2_solo_kills             ,
+                    sk.match_id               AS P2_match_id               ,
+                    sk.matchup_id             AS P2_matchup_id             ,
+                    sk.timestamp_ms           AS P2_timestamp_ms           ,
+                    sk.game_time_seconds      AS P2_game_time_seconds      ,
+                    sk.killer_participant_id  AS P2_killer_participant_id  ,
+                    sk.killer_champion_id     AS P2_killer_champion_id     ,
+                    sk.killer_champion_name   AS P2_killer_champion_name   ,
+                    sk.killer_level           AS P2_killer_level           ,
+                    sk.killer_gold            AS P2_killer_gold            ,
+                    sk.killer_position_x      AS P2_killer_position_x      ,
+                    sk.killer_position_y      AS P2_killer_position_y      ,
+                    sk.victim_participant_id  AS P2_victim_participant_id  ,
+                    sk.victim_champion_id     AS P2_victim_champion_id     ,
+                    sk.victim_champion_name   AS P2_victim_champion_name   ,
+                    sk.victim_level           AS P2_victim_level           ,
+                    sk.victim_gold            AS P2_victim_gold            ,
+                    sk.victim_position_x      AS P2_victim_position_x      ,
+                    sk.victim_position_y      AS P2_victim_position_y      ,
+                    sk.level_diff             AS P2_level_diff             ,
+                    sk.gold_diff              AS P2_gold_diff              ,
+                    sk.is_first_blood         AS P2_is_first_blood         ,
+                    sk.is_shutdown            AS P2_is_shutdown            ,
+                    sk.bounty_gold            AS P2_bounty_gold            ,
+                    sk.created_at             AS P2_solo_created_at        
+                    FROM solo_kills AS sk
+                    INNER JOIN kill_items AS ki ON ki.solo_kill_id = sk.id
+                    WHERE sk.killer_champion_id < sk.victim_champion_id
+                      AND ki.id = (
+                          SELECT MAX(id)
+                          FROM kill_items
+                          WHERE solo_kill_id = ki.solo_kill_id
+                      )
+                ) AS P2
+                ON P1.P1_solo_kill_id = P2.P2_solo_kill_id
+                )
+                UNION ALL
+                (
+                SELECT *
+                FROM (
+                    SELECT
+                    ki.id                     AS P1_id                     ,
+                    ki.solo_kill_id           AS P1_solo_kill_id           ,
+                    ki.participant_id         AS P1_participant_id         ,
+                    ki.participant_type       AS P1_participant_type       ,
+                    ki.ITEM0                  AS P1_item0                  ,
+                    ki.ITEM1                  AS P1_item1                  ,
+                    ki.ITEM2                  AS P1_item2                  ,
+                    ki.ITEM3                  AS P1_item3                  ,
+                    ki.ITEM4                  AS P1_item4                  ,
+                    ki.ITEM5                  AS P1_item5                  ,
+                    ki.ITEM6                  AS P1_item6                  ,
+                    ki.total_item_value       AS P1_total_item_value       ,
+                    ki.created_at             AS P1_kill_created_at        ,
+                    sk.id                     AS P1_solo_kills             ,
+                    sk.match_id               AS P1_match_id               ,
+                    sk.matchup_id             AS P1_matchup_id             ,
+                    sk.timestamp_ms           AS P1_timestamp_ms           ,
+                    sk.game_time_seconds      AS P1_game_time_seconds      ,
+                    sk.killer_participant_id  AS P1_killer_participant_id  ,
+                    sk.killer_champion_id     AS P1_killer_champion_id     ,
+                    sk.killer_champion_name   AS P1_killer_champion_name   ,
+                    sk.killer_level           AS P1_killer_level           ,
+                    sk.killer_gold            AS P1_killer_gold            ,
+                    sk.killer_position_x      AS P1_killer_position_x      ,
+                    sk.killer_position_y      AS P1_killer_position_y      ,
+                    sk.victim_participant_id  AS P1_victim_participant_id  ,
+                    sk.victim_champion_id     AS P1_victim_champion_id     ,
+                    sk.victim_champion_name   AS P1_victim_champion_name   ,
+                    sk.victim_level           AS P1_victim_level           ,
+                    sk.victim_gold            AS P1_victim_gold            ,
+                    sk.victim_position_x      AS P1_victim_position_x      ,
+                    sk.victim_position_y      AS P1_victim_position_y      ,
+                    sk.level_diff             AS P1_level_diff             ,
+                    sk.gold_diff              AS P1_gold_diff              ,
+                    sk.is_first_blood         AS P1_is_first_blood         ,
+                    sk.is_shutdown            AS P1_is_shutdown            ,
+                    sk.bounty_gold            AS P1_bounty_gold            ,
+                    sk.created_at             AS P1_solo_created_at        
+                    FROM solo_kills AS sk
+                    INNER JOIN kill_items AS ki ON ki.solo_kill_id = sk.id
+                    WHERE sk.killer_champion_id > sk.victim_champion_id
+                      AND ki.id = (
+                          SELECT MAX(id)
+                          FROM kill_items
+                          WHERE solo_kill_id = ki.solo_kill_id
+                      )
+                ) AS P1
+                INNER JOIN (
+                    SELECT
+                    ki.id                     AS P2_id                     ,
+                    ki.solo_kill_id           AS P2_solo_kill_id           ,
+                    ki.participant_id         AS P2_participant_id         ,
+                    ki.participant_type       AS P2_participant_type       ,
+                    ki.ITEM0                  AS P2_item0                  ,
+                    ki.ITEM1                  AS P2_item1                  ,
+                    ki.ITEM2                  AS P2_item2                  ,
+                    ki.ITEM3                  AS P2_item3                  ,
+                    ki.ITEM4                  AS P2_item4                  ,
+                    ki.ITEM5                  AS P2_item5                  ,
+                    ki.ITEM6                  AS P2_item6                  ,
+                    ki.total_item_value       AS P2_total_item_value       ,
+                    ki.created_at             AS P2_kill_created_at        ,
+                    sk.id                     AS P2_solo_kills             ,
+                    sk.match_id               AS P2_match_id               ,
+                    sk.matchup_id             AS P2_matchup_id             ,
+                    sk.timestamp_ms           AS P2_timestamp_ms           ,
+                    sk.game_time_seconds      AS P2_game_time_seconds      ,
+                    sk.killer_participant_id  AS P2_killer_participant_id  ,
+                    sk.killer_champion_id     AS P2_killer_champion_id     ,
+                    sk.killer_champion_name   AS P2_killer_champion_name   ,
+                    sk.killer_level           AS P2_killer_level           ,
+                    sk.killer_gold            AS P2_killer_gold            ,
+                    sk.killer_position_x      AS P2_killer_position_x      ,
+                    sk.killer_position_y      AS P2_killer_position_y      ,
+                    sk.victim_participant_id  AS P2_victim_participant_id  ,
+                    sk.victim_champion_id     AS P2_victim_champion_id     ,
+                    sk.victim_champion_name   AS P2_victim_champion_name   ,
+                    sk.victim_level           AS P2_victim_level           ,
+                    sk.victim_gold            AS P2_victim_gold            ,
+                    sk.victim_position_x      AS P2_victim_position_x      ,
+                    sk.victim_position_y      AS P2_victim_position_y      ,
+                    sk.level_diff             AS P2_level_diff             ,
+                    sk.gold_diff              AS P2_gold_diff              ,
+                    sk.is_first_blood         AS P2_is_first_blood         ,
+                    sk.is_shutdown            AS P2_is_shutdown            ,
+                    sk.bounty_gold            AS P2_bounty_gold            ,
+                    sk.created_at             AS P2_solo_created_at        
+                    FROM solo_kills AS sk
+                    INNER JOIN kill_items AS ki ON ki.solo_kill_id = sk.id
+                    WHERE sk.killer_champion_id > sk.victim_champion_id
+                      AND ki.id = (
+                          SELECT MIN(id)
+                          FROM kill_items
+                          WHERE solo_kill_id = ki.solo_kill_id
+                      )
+                ) AS P2
+                ON P1.P1_solo_kill_id = P2.P2_solo_kill_id
+                )) AS SOLO_KILL_ITEM_PAIRS
+                LEFT JOIN items AS P1_ITEM0 ON P1_ITEM0.id = SOLO_KILL_ITEM_PAIRS.P1_item0
+                LEFT JOIN items AS P1_ITEM1 ON P1_ITEM1.id = SOLO_KILL_ITEM_PAIRS.P1_item1
+                LEFT JOIN items AS P1_ITEM2 ON P1_ITEM2.id = SOLO_KILL_ITEM_PAIRS.P1_item2
+                LEFT JOIN items AS P1_ITEM3 ON P1_ITEM3.id = SOLO_KILL_ITEM_PAIRS.P1_item3
+                LEFT JOIN items AS P1_ITEM4 ON P1_ITEM4.id = SOLO_KILL_ITEM_PAIRS.P1_item4
+                LEFT JOIN items AS P1_ITEM5 ON P1_ITEM5.id = SOLO_KILL_ITEM_PAIRS.P1_item5
+                LEFT JOIN items AS P1_ITEM6 ON P1_ITEM6.id = SOLO_KILL_ITEM_PAIRS.P1_item6
+                LEFT JOIN items AS P2_ITEM0 ON P2_ITEM0.id = SOLO_KILL_ITEM_PAIRS.P2_item0
+                LEFT JOIN items AS P2_ITEM1 ON P2_ITEM1.id = SOLO_KILL_ITEM_PAIRS.P2_item1
+                LEFT JOIN items AS P2_ITEM2 ON P2_ITEM2.id = SOLO_KILL_ITEM_PAIRS.P2_item2
+                LEFT JOIN items AS P2_ITEM3 ON P2_ITEM3.id = SOLO_KILL_ITEM_PAIRS.P2_item3
+                LEFT JOIN items AS P2_ITEM4 ON P2_ITEM4.id = SOLO_KILL_ITEM_PAIRS.P2_item4
+                LEFT JOIN items AS P2_ITEM5 ON P2_ITEM5.id = SOLO_KILL_ITEM_PAIRS.P2_item5
+                LEFT JOIN items AS P2_ITEM6 ON P2_ITEM6.id = SOLO_KILL_ITEM_PAIRS.P2_item6
+                INNER JOIN matches AS matches ON P1_match_id = matches.match_id
+                """
+                # 出力は明示的な debug フラグがあるときだけ行う
+                if debug:
+                    # 標準出力に出してコピーしやすくする
+                    print("--- select_training_data SQL (debug) ---")
+                    print(query)
+                    print("--- params ---")
+                    print(params)
+                params = []
+
+                # トップレベルの WHERE 条件を安全に構築する
+                top_level_clauses = []
+
+                if mychampion is not None:
+                    # mychampion が P1 または P2 のどちらかに一致する行のみを取得
+                    # enemyChampion が指定されていれば、(my vs enemy) OR (enemy vs my) の対称条件を使う
+                    if enemyChampion is not None:
+                        top_level_clauses.append("((SOLO_KILL_ITEM_PAIRS.P1_killer_champion_id = %s AND SOLO_KILL_ITEM_PAIRS.P2_victim_champion_id = %s) OR (SOLO_KILL_ITEM_PAIRS.P1_killer_champion_id = %s AND SOLO_KILL_ITEM_PAIRS.P2_victim_champion_id = %s))"
+                        )
+                        # プレースホルダ順: my, enemy, enemy, my
+                        params.extend([mychampion, enemyChampion, enemyChampion, mychampion])
+                    else:
+                        # 単純に mychampion が P1 または P2 に一致する行
+                        top_level_clauses.append("(SOLO_KILL_ITEM_PAIRS.P1_killer_champion_id = %s OR SOLO_KILL_ITEM_PAIRS.P2_victim_champion_id = %s)")
+                        params.extend([mychampion, mychampion])
+                        # 安全な書き方
+                if top_level_clauses:
+                    # 組み立てたトップレベル WHERE を安全に追記する（既存の内部トークンを壊さない）
+                    where_clause = "\nWHERE " + " AND ".join(top_level_clauses) + "\n"
+                    # 末尾に改行がなければ追加してから WHERE を付与
+                    if not query.endswith('\n'):
+                        query = query + '\n'
+                    query = query + where_clause
+
+                # LIMIT は整数化してインラインで追加（例: LIMIT 100）
+                try:
+                    limit_int = int(limit) if limit is not None else 0
+                    if limit_int > 0:
+                        if not query.endswith('\n'):
+                            query = query + '\n'
+                        query = query + f"LIMIT {limit_int}\n"
+                except Exception:
+                    logger.warning(f"無効な limit 指定を無視します: {limit}")
+
+                # ログは debug フラグで制御。ユーザーが要求したとおり最終SQLを出力するのは debug=True のときだけ
+                #print("select_training_data - final query:\n%s", query)
+                #print("select_training_data params: %s", params)
+                # 標準出力に出してコピーしやすくする
+                #print("--- select_training_data SQL (debug) ---")
+                #print(query)
+                #print("--- params ---")
+                #print(params)
+
+                cursor.execute(query, params if params else None)
+                rows = cursor.fetchall()
+
+                logger.info("select_training_data - fetched rows: %d", len(rows) if rows else 0)
+
+                # 辞書 cursor を使っているのでそのまま返す
+                return [dict(r) for r in rows] if rows else []
+
+        except Error as e:
+            logger.error(f"学習データを取得エラー: {e}")
+            return []
+
 def main():
     """テスト用のメイン関数"""
     # ログ設定
@@ -578,11 +979,11 @@ def main():
     
     # テスト用の設定
     mysql_config = {
-        'host': 'localhost',
+        'host': '160.251.214.153',
         'port': 3306,
-        'database': 'lol_winrate_db',
-        'user': 'root',
-        'password': '',
+        'database': 'loldb',
+        'user': 'admin',
+        'password': 'RO3f7p6k$!',
         'charset': 'utf8mb4'
     }
     
@@ -594,9 +995,7 @@ def main():
         print("=== データベース統計 ===")
         for key, value in stats.items():
             print(f"{key}: {value}")
-        
-        print("データベース接続テスト成功")
-        
+        db_manager.select_training_data(limit=1000000, mychampion=None, enemyChampion=None)
     except Exception as e:
         print(f"データベース接続テストエラー: {e}")
 

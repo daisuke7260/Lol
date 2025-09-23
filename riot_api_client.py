@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime
 import logging
+from config import RIOT_API_KEY
 
 # ログ設定
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +31,38 @@ class RateLimitInfo:
             self.request_times_2m = []
 
 class RiotAPIClient:
+    
+    def __init__(self, api_key: str, region: str = 'jp1'):
+        """
+        APIクライアントを初期化
+        
+        Args:
+            api_key: Riot Games API キー
+            region: 地域コード (例: 'jp1', 'kr', 'na1')
+        """
+        self.api_key = api_key
+        self.region = region
+        self.rate_limit = RateLimitInfo()
+        
+        # 地域エンドポイントを設定
+        self.base_url = self.REGIONAL_ENDPOINTS.get(region, self.REGIONAL_ENDPOINTS['jp1'])
+        
+        # 地域に応じた大陸エンドポイントを設定
+        if region in ['na1', 'br1', 'la1', 'la2']:
+            self.continental_region = 'americas'
+        elif region in ['kr', 'jp1']:
+            self.continental_region = 'asia'
+        else:
+            self.continental_region = 'europe'
+        
+        self.continental_url = self.CONTINENTAL_ENDPOINTS.get(self.continental_region)
+        
+        self.session = requests.Session()
+        self.session.headers.update({
+            'X-Riot-Token': self.api_key,
+            'User-Agent': 'LOL-Winrate-Calculator/1.0'
+        })
+    
     def get_league_entries_by_tier_division(self, tier: str, division: str, queue: str = 'RANKED_SOLO_5x5', page: int = 1) -> Optional[List[Dict]]:
         """
         指定したtier/divisionのリーグエントリー一覧を取得
@@ -68,37 +101,6 @@ class RiotAPIClient:
         'asia': 'https://asia.api.riotgames.com',
         'europe': 'https://europe.api.riotgames.com'
     }
-    
-    def __init__(self, api_key: str, region: str = 'jp1'):
-        """
-        APIクライアントを初期化
-        
-        Args:
-            api_key: Riot Games API キー
-            region: 地域コード (例: 'jp1', 'kr', 'na1')
-        """
-        self.api_key = api_key
-        self.region = region
-        self.rate_limit = RateLimitInfo()
-        
-        # 地域エンドポイントを設定
-        self.base_url = self.REGIONAL_ENDPOINTS.get(region, self.REGIONAL_ENDPOINTS['jp1'])
-        
-        # 地域に応じた大陸エンドポイントを設定
-        if region in ['na1', 'br1', 'la1', 'la2']:
-            self.continental_region = 'americas'
-        elif region in ['kr', 'jp1']:
-            self.continental_region = 'asia'
-        else:
-            self.continental_region = 'europe'
-        
-        self.continental_url = self.CONTINENTAL_ENDPOINTS.get(self.continental_region)
-        
-        self.session = requests.Session()
-        self.session.headers.update({
-            'X-Riot-Token': self.api_key,
-            'User-Agent': 'LOL-Winrate-Calculator/1.0'
-        })
     
     def _wait_for_rate_limit(self):
         """レート制限に従って待機"""
@@ -376,6 +378,76 @@ class RiotAPIClient:
         base_url = self.REGIONAL_ENDPOINTS[self.region]
         url = f"{base_url}/lol/summoner/v4/summoners/by-name/{summoner_name}"
         return self._make_request(url)
+
+    def get_summoner_rank_tier(self, summoner_id: str) -> Optional[str]:
+        """
+        指定された（暗号化された）サモナーIDのランクティア（簡略名）を取得。
+        ソロランク（RANKED_SOLO_5x5）を優先的に返します。
+
+        Returns:
+            例: 'SILVER', 'GOLD', 'PLATINUM' など。取得できない場合は None を返す。
+        """
+        if not summoner_id:
+            return None
+        entries = self.get_league_entries_by_summoner(summoner_id)
+        if not entries:
+            return None
+        print("★★")
+
+        # ソロランクを優先して探す
+        solo_entry = None
+        for e in entries:
+            if e.get('queueType') == 'RANKED_SOLO_5x5':
+                solo_entry = e
+                break
+
+        entry = solo_entry or entries[0]
+        tier = entry.get('tier')
+        return tier.upper() if tier else None
+
+    def get_match_average_tier_by_match_id(self, match_data: Dict) -> Optional[str]:
+        """
+        試合IDから参加者のランクを Riot API で取得し、平均的なティアを返す。
+
+        戻り値は簡略ティア名（例: 'SILVER', 'GOLD'）のみ。数値は返しません。
+        実装は以下の流れ:
+          1. match の詳細を取得
+          2. 各 participant の暗号化された summonerId が無ければ puuid から取得
+          3. 各サモナーのソロランクティアを取得
+          4. ティアを順序にマップして平均を計算し、最も近いティア名を返す
+
+        注意: 参加者ごとに追加の API 呼び出しが発生するため、実行は遅くなる可能性があります。
+        """
+        participants = match_data.get('info', {}).get('participants', [])
+        if not participants:
+            return None
+        tier_order = ['IRON', 'BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'DIAMOND', 'MASTER', 'GRANDMASTER', 'CHALLENGER']
+        tier_to_value = {t: i+1 for i, t in enumerate(tier_order)}
+
+        values = []
+        for p in participants:
+            summoner_id = p.get('summonerId')
+            if not summoner_id:
+                puuid = p.get('puuid')
+                if puuid:
+                    summoner = self.get_summoner_by_puuid(puuid)
+                    if summoner:
+                        summoner_id = summoner.get('id')
+            if not summoner_id:
+                continue
+            tier = self.get_summoner_rank_tier(summoner_id)
+            if tier and tier in tier_to_value:
+                values.append(tier_to_value[tier])
+
+        if not values:
+            return None
+
+        avg = sum(values) / len(values)
+        # 最も近い整数に丸めて対応するティアを返す
+        rounded = int(round(avg))
+        # clamp
+        rounded = max(1, min(rounded, len(tier_order)))
+        return tier_order[rounded-1]
     
     def get_challenger_league(self, queue: str = 'RANKED_SOLO_5x5') -> Optional[Dict]:
         """
@@ -435,10 +507,10 @@ class RiotAPIClient:
 
 def main():
     """テスト用のメイン関数"""
-    # 注意: 実際のAPIキーが必要です
-    api_key = "RGAPI-a0b1650e-5f4a-4175-990c-c48095fbca3f"
-    
-    if api_key == "YOUR_API_KEY_HERE":
+    # APIキーは `config.py` の `RIOT_API_KEY` を使う
+    api_key = RIOT_API_KEY if 'RIOT_API_KEY' in globals() else None
+
+    if not api_key or api_key == "YOUR_API_KEY_HERE":
         print("APIキーを設定してください")
         return
     
