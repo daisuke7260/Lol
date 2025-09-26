@@ -1,0 +1,42 @@
+{
+  "ban_champion": "Yasuo",
+  "auto_accept_queue": true,
+  "accept_delay_seconds": 0.5,
+  "auto_pick_champion": true,
+  "pick_delay_seconds": 1.0,
+  "auto_lock": true,
+  "champion_preferences": {
+    "top": [
+      "Garen",
+      "Darius",
+      "Malphite"
+    ],
+    "jungle": [
+      "Master Yi",
+      "Warwick",
+      "Ammu"
+    ],
+    "middle": [
+      "Annie",
+      "Lux",
+      "Yasuo"
+    ],
+    "bottom": [
+      "Ashe",
+      "Jinx",
+      "Miss Fortune"
+    ],
+    "utility": [
+      "Blitzcrank",
+      "Thresh",
+      "Morgana"
+    ]
+  },
+  "fallback_champions": [
+    "Garen",
+    "Annie",
+    "Ashe"
+  ],
+  "description": "V3設定ファイル（GUI対応）",
+  "version": "3.0"
+}

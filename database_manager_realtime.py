@@ -191,7 +191,7 @@ class RealtimeDatabaseManager:
             logger.error(f"アイテム挿入エラー: {e}")
             return False
     
-    def insert_match(self, match_data: Dict) -> bool:
+    def insert_match(self, match_data: Dict, tier: int) -> bool:
         game_version = match_data.get('info', {}).get('gameVersion')
         self.insert_game_version(game_version)
         """試合情報を挿入"""
@@ -206,8 +206,8 @@ class RealtimeDatabaseManager:
                 INSERT INTO matches (
                     match_id, game_creation, game_duration, game_end_timestamp,
                     game_mode, game_type, game_version, map_id, platform_id,
-                    queue_id, tournament_code, has_timeline
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    queue_id, tournament_code, has_timeline, tier
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                 game_duration = VALUES(game_duration),
                 has_timeline = VALUES(has_timeline)
@@ -225,7 +225,8 @@ class RealtimeDatabaseManager:
                     info.get('platformId'),
                     info.get('queueId'),
                     info.get('tournamentCode'),
-                    0  # has_timeline は後で更新
+                    0,  # has_timeline は後で更新
+                    tier,
                 )
                 
                 cursor.execute(query, values)

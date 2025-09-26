@@ -1,0 +1,27 @@
+{
+  "3031": {
+    "name": "Infinity Edge",
+    "cost": 3400,
+    "category": "damage"
+  },
+  "3046": {
+    "name": "Phantom Dancer",
+    "cost": 2600,
+    "category": "attack_speed"
+  },
+  "3072": {
+    "name": "Bloodthirster",
+    "cost": 3400,
+    "category": "lifesteal"
+  },
+  "3153": {
+    "name": "Blade of the Ruined King",
+    "cost": 3200,
+    "category": "on_hit"
+  },
+  "3026": {
+    "name": "Guardian Angel",
+    "cost": 2800,
+    "category": "defensive"
+  }
+}

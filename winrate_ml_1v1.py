@@ -113,6 +113,45 @@ class WinrateML1v1Trainer:
         acc = accuracy_score(y_test, y_pred)
         logger.info(f'検証 Accuracy: {acc:.4f}')
 
+        # --- 追加: テストセットの各サンプルについて P1 である確率を出力 ---
+        try:
+            if hasattr(clf, 'predict_proba'):
+                probs = clf.predict_proba(X_test)[:, 1]
+                logger.info('各テストサンプルの P1 確率（モデル出力）:')
+                # 行インデックス・真値・予測ラベルと確率を1件ずつ表示
+                lines = []  
+                for i, prob in enumerate(probs):
+                    idx = X_test.index[i]
+                    true_label = int(y_test.iloc[i]) if hasattr(y_test.iloc[i], '__int__') else y_test.iloc[i]
+                    pred_label = int(y_pred[i]) if hasattr(y_pred[i], '__int__') else y_pred[i]
+                    line = f'Sample {idx}: P(P1)={prob:.4%}, true={true_label}, pred={pred_label}'
+                    lines.append(line)
+                    logger.info(f'  {line}')
+                    print(line)
+
+                # 平均確率等の要約を先頭に追加
+                try:
+                    avg_prob = float(np.mean(probs))
+                except Exception:
+                    avg_prob = 0.0
+                summary = f'Average P(P1) on test set: {avg_prob:.4%} ({len(probs)} samples)'
+                lines.insert(0, summary)
+
+                # predictions ファイルへ書き出し（オーバーレイが監視して表示する用途）
+                try:
+                    pred_dir = os.path.join(os.path.dirname(__file__))
+                    os.makedirs(pred_dir, exist_ok=True)
+                    pred_file = os.path.join(pred_dir, 'predictions.txt')
+                    with open(pred_file, 'w', encoding='utf-8') as f:
+                        f.write('\n'.join(lines))
+                    logger.info(f'予測結果を {pred_file} に書き出しました')
+                except Exception:
+                    logger.exception('予測結果ファイルの書き出しに失敗しました')
+            else:
+                logger.warning('モデルが predict_proba をサポートしていないため、確率を出力できません')
+        except Exception as e:
+            logger.exception(f'テストサンプルごとの確率出力でエラーが発生しました: {e}')
+
         # 可能なら AUC も計算
         try:
             if hasattr(clf, 'predict_proba'):
@@ -134,10 +173,20 @@ def main():
     trainer = WinrateML1v1Trainer(MYSQL_CONFIG)
 
     # データを取得（必要に応じて mychampion/enemyChampion を指定）
-    df = trainer.load_data(limit=10000, mychampion=126, enemyChampion=157)
+    df = trainer.load_data(limit=10000, mychampion=79, enemyChampion=58)
     if df.empty:
         logger.error('学習データが空です。終了します。')
         return
+
+    # --- 追加: 読み込んだデータにおける P1 の勝率を計算して表示 ---
+    if 'Win_Judgment' in df.columns:
+        total_rows = len(df)
+        p1_wins = int((df['Win_Judgment'] == 'P1').sum())
+        p1_win_rate = float(p1_wins) / total_rows if total_rows > 0 else 0.0
+        logger.info(f'読み込んだデータにおける P1 の勝率: {p1_win_rate:.4f} ({p1_wins}/{total_rows})')
+        print(f'P1 win rate: {p1_win_rate:.4%} ({p1_wins}/{total_rows})')
+    else:
+        logger.warning('Win_Judgment カラムが存在しないため、P1勝率を計算できません')
 
     X, y, features = trainer.preprocess(df)
     if y.size == 0 or X.empty:

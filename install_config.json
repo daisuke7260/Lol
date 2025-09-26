@@ -1,0 +1,31 @@
+{
+  "package_info": {
+    "name": "LOL Auto BAN Tool V4",
+    "version": "4.0.0",
+    "build_date": "2025-09-05T08:58:18.580784",
+    "description": "League of Legends Auto BAN & AI Winrate Prediction Tool - Complete Working Version"
+  },
+  "features": {
+    "complete_class_definitions": true,
+    "working_modules": true,
+    "tested_functionality": true,
+    "import_errors_resolved": true,
+    "gui_functional": true,
+    "real_time_monitoring": true,
+    "prediction_system": true
+  },
+  "installation": {
+    "python_version": "3.11.9",
+    "required_packages": [
+      "requests",
+      "opencv-python",
+      "scikit-learn",
+      "pillow",
+      "mss",
+      "numpy",
+      "pandas",
+      "matplotlib",
+      "psutil"
+    ]
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "Yasuo": {
+    "id": 157,
+    "name": "Yasuo",
+    "title": "The Unforgiven",
+    "winrate": 48.5
+  },
+  "Zed": {
+    "id": 238,
+    "name": "Zed",
+    "title": "The Master of Shadows",
+    "winrate": 51.2
+  },
+  "Garen": {
+    "id": 86,
+    "name": "Garen",
+    "title": "The Might of Demacia",
+    "winrate": 52.8
+  },
+  "Ashe": {
+    "id": 22,
+    "name": "Ashe",
+    "title": "The Frost Archer",
+    "winrate": 50.1
+  },
+  "Thresh": {
+    "id": 412,
+    "name": "Thresh",
+    "title": "The Chain Warden",
+    "winrate": 49.7
+  },
+  "Katarina": {
+    "id": 55,
+    "name": "Katarina",
+    "title": "The Sinister Blade",
+    "winrate": 47.9
+  },
+  "Vayne": {
+    "id": 67,
+    "name": "Vayne",
+    "title": "The Night Hunter",
+    "winrate": 49.3
+  },
+  "Darius": {
+    "id": 122,
+    "name": "Darius",
+    "title": "The Hand of Noxus",
+    "winrate": 51.5
+  }
+}

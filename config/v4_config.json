@@ -1,0 +1,32 @@
+{
+  "version": "4.0.0",
+  "v3_settings": {
+    "auto_accept_enabled": false,
+    "auto_ban_enabled": false,
+    "auto_pick_enabled": false,
+    "ban_champion": "Yasuo",
+    "pick_champions": {
+      "top": "Garen",
+      "jungle": "Warwick",
+      "mid": "Annie",
+      "adc": "Ashe",
+      "support": "Soraka"
+    }
+  },
+  "v4_settings": {
+    "winrate_analysis_enabled": true,
+    "monitoring_interval": 3,
+    "auto_start_with_game": false,
+    "overlay_enabled": true,
+    "overlay_position": {
+      "x": 100,
+      "y": 100
+    },
+    "overlay_transparency": 0.8
+  },
+  "advanced_settings": {
+    "logging_level": "INFO",
+    "performance_mode": "normal",
+    "auto_update": true
+  }
+}

@@ -127,9 +127,9 @@ class RealtimeDataCollector:
                 # タイムラインなしでも基本データは保存
                 return self._process_match_without_timeline(match_data)
             
-            # 試合データを挿入
-            avg_tier = self.api_client.get_match_average_tier_by_match_id(match_data)
-            if not self.db_manager.insert_match(match_data):
+            # 試合の平均ランクを取得
+            average_rank = self.api_client.get_match_average_tier_by_match_id(match_data)
+            if not self.db_manager.insert_match(match_data, average_rank):
                 logger.error(f"試合データの挿入に失敗: {match_id}")
                 return False
             
@@ -407,7 +407,7 @@ class RealtimeDataCollector:
                 
                 # 既に処理済みかチェック
                 if self._is_match_processed(match_id):
-                    logger.debug(f"試合は既に処理済み: {match_id}")
+                    logger.info(f"試合は既に処理済み: {match_id}")
                     continue
                 
                 # 試合データを収集
@@ -588,7 +588,7 @@ def main():
             logger.info(f"{tier}ランクのデータ収集を開始...")
             results = collector.collect_from_high_rank_players(
                 tier=tier,
-                player_count=1000,  # 必要に応じて調整
+                player_count=10000,  # 必要に応じて調整
                 matches_per_player=50  # 必要に応じて調整
             )
             print(f"\n=== {tier} 収集結果 ===")

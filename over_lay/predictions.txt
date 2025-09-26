@@ -1,0 +1,7 @@
+Average P(P1) on test set: 63.1667% (6 samples)
+Sample 13: P(P1)=63.0000%, true=1, pred=1
+Sample 20: P(P1)=49.0000%, true=0, pred=0
+Sample 17: P(P1)=57.0000%, true=0, pred=1
+Sample 7: P(P1)=79.0000%, true=1, pred=1
+Sample 24: P(P1)=58.0000%, true=0, pred=1
+Sample 2: P(P1)=73.0000%, true=1, pred=1
