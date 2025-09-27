@@ -184,7 +184,9 @@ class LOLV4GUI:
         try:
             self.v4_system.start_monitoring()
             print("キャラクタウィンドウを初期化中...")
-            self.character_overlay = CharacterOverlay()
+            # 親ウィンドウを渡してCharacterOverlayを作成
+            self.character_overlay = CharacterOverlay(parent=self.root)
+            self.character_overlay.run()  # 表示
             # 分析モジュールのインポート
             self.start_button.configure(state=tk.DISABLED)
             self.stop_button.configure(state=tk.NORMAL)
@@ -192,6 +194,8 @@ class LOLV4GUI:
             self.update_status("監視中...")
         except Exception as e:
             messagebox.showerror("エラー", f"監視開始に失敗しました: {e}")
+            import traceback
+            traceback.print_exc()
     
     def stop_monitoring(self):
         """監視停止"""
